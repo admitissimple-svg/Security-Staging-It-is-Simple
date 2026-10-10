@@ -4399,12 +4399,19 @@ export default function App() {
     setIsRefreshingTutors(true);
     try {
       await refreshNativeFriends().catch(() => null);
-      const email = currentAccount?.email || '';
-      const role = currentAccount?.role || '';
-      const uid = currentAccount?.uid || '';
-      const isAdminUser = role === 'admin' || email.toLowerCase() === 'adm.itissimple@gmail.com' || isAdminApprovalsOpen;
-      const query = `admin=${isAdminUser ? 'true' : 'false'}&includePending=${isAdminUser ? 'true' : 'false'}&email=${encodeURIComponent(email)}&role=${encodeURIComponent(role)}${uid ? `&uid=${encodeURIComponent(uid)}` : ''}&_t=${Date.now()}`;
-      const res = await fetch(`/api/tutors?${query}`, { cache: 'no-store' });
+      let token: string | null = null;
+      const isAdminUser = currentAccount?.role === 'admin' || currentAccount?.email?.toLowerCase() === 'adm.itissimple@gmail.com' || isAdminApprovalsOpen;
+      if (isAdminUser) {
+        token = await getAdminAccessToken().catch(() => null);
+      }
+      if (!token) {
+        token = await getAccessToken().catch(() => null);
+      }
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await fetch(`/api/tutors?_t=${Date.now()}`, { headers, cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {

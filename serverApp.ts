@@ -86,6 +86,7 @@ import {
   firebaseAuthMiddleware,
   requireAdmin,
   isVerifiedAdminRequest,
+  getVerifiedUserFromRequest,
 } from './src/middleware/firebaseAuth';
 import { getFirebaseAdminAuth } from './src/serverFirebaseAdmin';
 const rawEnvModel = (process.env.GEMINI_MODEL || '').trim();
@@ -1000,6 +1001,11 @@ app.get('/api/auth/verify-session', firebaseAuthMiddleware, (req, res) => {
   });
 });
 
+export const TRUSTED_ADMIN_EMAILS = new Set<string>([
+  'adm.itissimple@gmail.com',
+  'admin@itissimple.com',
+]);
+
 app.post('/api/auth/sync-admin-claims', firebaseAuthMiddleware, async (req, res) => {
   const caller = req.user;
   if (!caller || !caller.uid) {
@@ -1007,9 +1013,24 @@ app.post('/api/auth/sync-admin-claims', firebaseAuthMiddleware, async (req, res)
   }
 
   const cleanEmail = (caller.email || '').toLowerCase().trim();
-  const db = readDb();
 
-  const isMasterAdminEmail = cleanEmail === 'adm.itissimple@gmail.com' || cleanEmail === 'admin@itissimple.com';
+  // Rule 1: Caller email must be verified by Firebase Auth
+  if (!caller.email_verified) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Access denied: caller email must be verified to synchronize administrative claims',
+    });
+  }
+
+  // Rule 2: Caller email MUST belong to authoritative administrator email allowlist
+  if (!TRUSTED_ADMIN_EMAILS.has(cleanEmail)) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Access denied: caller is not an authorized administrator',
+    });
+  }
+
+  const db = readDb();
   const isTeacherAdmin = (db.teachers || []).some(
     (t: any) => t.role === 'admin' && (t.email || '').toLowerCase().trim() === cleanEmail
   );
@@ -1019,12 +1040,11 @@ app.post('/api/auth/sync-admin-claims', firebaseAuthMiddleware, async (req, res)
       (u: any) => u.role === 'admin' && (u.email || '').toLowerCase().trim() === cleanEmail
     );
 
-  const isLegitimateAdmin = caller.email_verified && (isMasterAdminEmail || isTeacherAdmin || isAuthUserAdmin);
-
-  if (!isLegitimateAdmin) {
+  const isConfirmedAdmin = isTeacherAdmin || isAuthUserAdmin || cleanEmail === 'adm.itissimple@gmail.com';
+  if (!isConfirmedAdmin) {
     return res.status(403).json({
       error: 'Forbidden',
-      message: 'Access denied: caller is not an authorized administrator',
+      message: 'Access denied: administrator account is not active or recognized in system records',
     });
   }
 
@@ -1721,6 +1741,14 @@ const handleRegistration = async (req: any, res: any) => {
   // 1. ADMIN REGISTRATION (Strictly only 1 admin allowed)
   // ----------------------------------------------------
   if (requestedRole === 'admin') {
+    // Only pre-authorized administrative emails can ever be registered as admin
+    if (!TRUSTED_ADMIN_EMAILS.has(cleanEmail)) {
+      return res.status(403).json({
+        error: 'Forbidden: não é permitido registrar contas de administrador para este endereço de e-mail.',
+        hasAdminRegistered: true,
+      });
+    }
+
     // Check if an admin already exists in authUsers or teachers
     const existingAdminInAuth = Object.values(db.authUsers || {}).find(
       (u: any) => u.role === 'admin' && u.email !== cleanEmail
@@ -2524,39 +2552,65 @@ app.get('/api/tutors', async (req, res) => {
     console.warn('Error fetching tutors from Firestore in GET /api/tutors:', err);
   }
 
-  const requesterEmail = ((req.query.email as string) || '').toLowerCase().trim();
-  const role = req.query.role as string;
-  const uid = (req.query.uid as string) || '';
+  // SECURITY HOTFIX — Native Friends Public API Authorization
+  // 1. Authenticate caller strictly via server-verified Firebase ID token.
+  // 2. Reject ANY privilege derivation from query parameters (?admin=true, ?includePending=true, ?role=admin, ?email=..., ?uid=...).
+  const verifiedUser = await getVerifiedUserFromRequest(req);
 
-  const isAdmin =
-    role === 'admin' ||
-    req.query.admin === 'true' ||
-    req.query.includePending === 'true' ||
-    requesterEmail === 'adm.itissimple@gmail.com' ||
-    Boolean(db.authUsers?.[requesterEmail]?.role === 'admin');
+  const isServerVerifiedAdmin = verifiedUser?.role === 'admin';
+  const verifiedCallerUid = verifiedUser?.uid || '';
+  const verifiedCallerEmail = (verifiedUser?.email || '').toLowerCase().trim();
 
-  if (isAdmin) {
-    return res.json(db.tutorsList || []);
+  // Helper to determine if a tutor record is approved
+  const isApprovedTutor = (t: any) => {
+    return Boolean(
+      t.approvalStatus === 'approved' ||
+      t.isApproved === true ||
+      t.status === 'approved' ||
+      t.approved === true
+    );
+  };
+
+  // If server-verified admin: return full listing of tutors (excluding explicitly deleted ones)
+  if (isServerVerifiedAdmin) {
+    const adminList = (db.tutorsList || []).filter((t: any) => {
+      const tEmail = (t.email || '').toLowerCase().trim();
+      const tId = (t.id || '').toLowerCase().trim();
+      return !db.deletedTutorEmails?.includes(tEmail) && !db.deletedTutorIds?.includes(tId);
+    });
+    return res.json(adminList);
   }
 
-  // Approved tutors are public; pending tutors are visible ONLY to the tutor themselves
-  const list = (db.tutorsList || []).filter((t: any) => {
+  // Non-admin / unauthenticated caller:
+  // - Public catalog accessible without login: returns only approved tutors.
+  // - Authenticated tutor: can additionally consult their OWN pending/unapproved registration,
+  //   without exposing registrations of any third parties.
+  const filteredList = (db.tutorsList || []).filter((t: any) => {
     const tEmail = (t.email || '').toLowerCase().trim();
     const tId = (t.id || '').toLowerCase().trim();
     if (db.deletedTutorEmails?.includes(tEmail) || db.deletedTutorIds?.includes(tId)) {
       return false;
     }
-    const isApproved =
-      t.approvalStatus === 'approved' ||
-      t.isApproved === true ||
-      t.status === 'approved' ||
-      t.approved === true;
-    if (isApproved) return true;
-    if (requesterEmail && tEmail === requesterEmail) return true;
-    if (uid && t.uid === uid) return true;
+
+    // 1. Approved tutors are public
+    if (isApprovedTutor(t)) {
+      return true;
+    }
+
+    // 2. If caller is an authenticated user (e.g. teacher), only include their OWN record
+    if (verifiedUser && verifiedCallerUid) {
+      const isOwnByUid = Boolean(t.uid && t.uid === verifiedCallerUid);
+      const isOwnById = Boolean(t.id && t.id === verifiedCallerUid);
+      const isOwnByEmail = Boolean(verifiedCallerEmail && tEmail && tEmail === verifiedCallerEmail);
+      if (isOwnByUid || isOwnById || isOwnByEmail) {
+        return true;
+      }
+    }
+
     return false;
   });
-  res.json(list);
+
+  return res.json(filteredList);
 });
 
 app.post('/api/tutors', async (req, res) => {

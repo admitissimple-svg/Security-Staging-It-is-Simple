@@ -241,33 +241,52 @@ export const requireStudent = (
 };
 
 /**
- * Safely checks if a request has a valid Firebase ID token with custom claim role === 'admin'.
- * Returns true only if verified by Firebase Admin SDK.
- * Returns false on any failure, unauthenticated request, or non-admin role.
+ * Safely extracts and verifies the Firebase ID token from the request if provided.
+ * Returns the AuthenticatedUser object if valid, or null if unauthenticated / invalid / missing.
+ * Does NOT throw or terminate the request (ideal for optional-auth endpoints like GET /api/tutors).
  */
-export async function isVerifiedAdminRequest(req: Request): Promise<boolean> {
+export async function getVerifiedUserFromRequest(req: Request): Promise<AuthenticatedUser | null> {
   // If request was already processed by firebaseAuthMiddleware
   if (req.user && req.user.uid) {
-    return req.user.role === 'admin';
+    return req.user;
   }
 
   const authHeader = req.headers.authorization;
   if (!authHeader) {
-    return false;
+    return null;
   }
 
   const parts = authHeader.trim().split(/\s+/);
   if (parts.length !== 2 || parts[0]?.toLowerCase() !== 'bearer' || !parts[1]) {
-    return false;
+    return null;
   }
 
   const idToken = parts[1];
   try {
     const adminAuth = getFirebaseAdminAuth();
     const decodedToken = await adminAuth.verifyIdToken(idToken);
-    return extractTrustedRole(decodedToken) === 'admin';
+    const role = extractTrustedRole(decodedToken);
+    const user: AuthenticatedUser = {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      email_verified: Boolean(decodedToken.email_verified),
+      role,
+    };
+    req.user = user;
+    return user;
   } catch {
-    return false;
+    return null;
   }
 }
+
+/**
+ * Safely checks if a request has a valid Firebase ID token with custom claim role === 'admin'.
+ * Returns true only if verified by Firebase Admin SDK.
+ * Returns false on any failure, unauthenticated request, or non-admin role.
+ */
+export async function isVerifiedAdminRequest(req: Request): Promise<boolean> {
+  const user = await getVerifiedUserFromRequest(req);
+  return user?.role === 'admin';
+}
+
 

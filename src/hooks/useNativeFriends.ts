@@ -156,9 +156,13 @@ export async function fetchPublicNativeFriendsFromFirestore(): Promise<{
 }> {
   const tutorMap = new Map<string, NativeFriendTutor>();
 
-  // 1. Primary: Server API /api/tutors (guarantees safe public delivery without direct database permission issues)
   try {
-    const res = await fetch('/api/tutors');
+    const headers: Record<string, string> = {};
+    if (auth.currentUser) {
+      const token = await auth.currentUser.getIdToken().catch(() => null);
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch('/api/tutors', { headers });
     if (res.ok) {
       const data = await res.json();
       const list = Array.isArray(data) ? data : (data?.tutors || []);
