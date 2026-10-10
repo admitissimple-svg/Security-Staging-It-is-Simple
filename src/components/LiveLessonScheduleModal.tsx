@@ -124,7 +124,9 @@ export const LiveLessonScheduleModal: React.FC<LiveLessonScheduleModalProps> = (
 
     if (activeStudentTeacherEmail) {
       const matched = teachers.filter(
-        (tc) => (tc.email || '').toLowerCase().trim() === activeStudentTeacherEmail
+        (tc) =>
+          (tc.email || '').toLowerCase().trim() === activeStudentTeacherEmail ||
+          (tc.id || '').toLowerCase().trim() === activeStudentTeacherEmail
       );
       if (matched.length > 0) {
         return matched;
@@ -214,8 +216,14 @@ export const LiveLessonScheduleModal: React.FC<LiveLessonScheduleModalProps> = (
     return name.replace(/\s*\(Amigo Nativo\)/gi, '').replace(/\s*\(Amiga Nativa\)/gi, '').replace(/\s*\(Native Friend\)/gi, '').trim();
   };
 
-  const selectedTeacherObj = availableTeachers.find((t) => (t.email || '').toLowerCase() === selectedTeacherEmail.toLowerCase())
-    || teachers.find((t) => (t.email || '').toLowerCase() === selectedTeacherEmail.toLowerCase())
+  const selectedTeacherObj = availableTeachers.find((t) =>
+    (t.email && t.email.toLowerCase() === selectedTeacherEmail.toLowerCase()) ||
+    (t.id && t.id.toLowerCase() === selectedTeacherEmail.toLowerCase())
+  )
+    || teachers.find((t) =>
+      (t.email && t.email.toLowerCase() === selectedTeacherEmail.toLowerCase()) ||
+      (t.id && t.id.toLowerCase() === selectedTeacherEmail.toLowerCase())
+    )
     || {
       name: userProfile?.teacherName || 'It is Simple Teacher',
       email: selectedTeacherEmail,
@@ -227,6 +235,7 @@ export const LiveLessonScheduleModal: React.FC<LiveLessonScheduleModalProps> = (
     if (!clean) return null;
     return (
       tutors?.find((tut) => (tut.email || '').toLowerCase().trim() === clean) ||
+      tutors?.find((tut) => (tut.id || '').toLowerCase().trim() === clean) ||
       tutors?.find((tut) => (tut.id || '').toLowerCase().trim() === (selectedTeacherObj as any)?.id?.toLowerCase().trim()) ||
       null
     );

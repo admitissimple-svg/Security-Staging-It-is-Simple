@@ -1025,7 +1025,10 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
 
                 <div className="grid grid-cols-1 gap-3">
                   {approvedTutors.map((tutor) => {
-                    const isSelected = tutor.email.toLowerCase() === currentTeacherEmail && hasActiveSubscription;
+                    const isSelected = Boolean(
+                      (tutor.email && tutor.email.toLowerCase() === currentTeacherEmail) ||
+                      (tutor.id && tutor.id.toLowerCase() === currentTeacherEmail)
+                    ) && hasActiveSubscription;
                     return (
                       <div
                         key={tutor.id || tutor.email}
@@ -1056,7 +1059,7 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-[#607EC9] font-mono">{tutor.email}</p>
+                              {tutor.email ? <p className="text-xs text-[#607EC9] font-mono">{tutor.email}</p> : null}
                               <p className="text-xs text-[#062863] font-medium mt-1">{tutor.headline || tutor.accent}</p>
 
                               {Array.isArray(tutor?.specialties) && tutor.specialties.length > 0 && (
@@ -1091,7 +1094,7 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
                                   type="button"
                                   disabled={isProcessing}
                                   onClick={async () => {
-                                    await handleSelectTutorDirectly(tutor.email, tutor.name);
+                                    await handleSelectTutorDirectly(tutor.email || tutor.id, tutor.name);
                                     if (onScheduleTrialLessonWithTutor) {
                                       onScheduleTrialLessonWithTutor(tutor);
                                     }
@@ -1122,7 +1125,7 @@ export const ManageSubscriptionModal: React.FC<ManageSubscriptionModalProps> = (
                                     <button
                                       type="button"
                                       disabled={isProcessing}
-                                      onClick={() => handleSelectTutorDirectly(tutor.email, tutor.name)}
+                                      onClick={() => handleSelectTutorDirectly(tutor.email || tutor.id, tutor.name)}
                                       className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer disabled:opacity-50"
                                       title={isEn ? 'Switch to this tutor directly' : 'Substituir para este tutor diretamente'}
                                     >

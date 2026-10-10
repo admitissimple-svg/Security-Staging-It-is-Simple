@@ -63,6 +63,33 @@ export function extractTrustedRole(
   return 'student';
 }
 
+const verifiedUserSet = new WeakSet<object>();
+
+/**
+ * Marks an AuthenticatedUser object as having proven verified origin from Firebase Admin SDK.
+ */
+export function markAsVerifiedUser(user: AuthenticatedUser): AuthenticatedUser {
+  if (user && typeof user === 'object') {
+    verifiedUserSet.add(user);
+  }
+  return user;
+}
+
+/**
+ * Validates whether an identity object has proven server-verified origin.
+ * Does not trust arbitrary objects attached to req.user by untrusted sources or request tampering.
+ */
+export function isVerifiedUser(user: unknown): user is AuthenticatedUser {
+  if (!user || typeof user !== 'object') return false;
+  if (!verifiedUserSet.has(user as object)) return false;
+  const u = user as AuthenticatedUser;
+  return (
+    typeof u.uid === 'string' &&
+    u.uid.length > 0 &&
+    (u.role === 'admin' || u.role === 'teacher' || u.role === 'student')
+  );
+}
+
 /**
  * Dedicated Express authentication middleware that verifies Firebase ID tokens.
  *
@@ -106,13 +133,14 @@ export const firebaseAuthMiddleware = async (
     // Extract trusted role strictly from verified token claims
     const role = extractTrustedRole(decodedToken);
 
-    // Attach ONLY verified identity information from server-verified token
-    req.user = {
+    // Attach ONLY verified identity information from server-verified token with trusted provenance
+    const user: AuthenticatedUser = markAsVerifiedUser({
       uid: decodedToken.uid,
       email: decodedToken.email,
       email_verified: Boolean(decodedToken.email_verified),
       role,
-    };
+    });
+    req.user = user;
 
     next();
   } catch (err: unknown) {
@@ -143,7 +171,7 @@ export const firebaseAuthMiddleware = async (
 };
 
 /**
- * Ensures that an authenticated user identity exists on the request.
+ * Ensures that an authenticated user identity exists on the request with proven origin.
  * Returns 401 if unauthenticated.
  */
 export const requireAuthenticatedUser = (
@@ -151,7 +179,7 @@ export const requireAuthenticatedUser = (
   res: Response,
   next: NextFunction
 ): void => {
-  if (!req.user || !req.user.uid) {
+  if (!req.user || !req.user.uid || !isVerifiedUser(req.user)) {
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authentication required: verified user token missing',
@@ -162,7 +190,7 @@ export const requireAuthenticatedUser = (
 };
 
 /**
- * Ensures that the authenticated user possesses the 'admin' role.
+ * Ensures that the authenticated user possesses the 'admin' role with proven origin.
  * Requires verified req.user.role === 'admin'.
  * Returns 401 if unauthenticated, 403 if unauthorized.
  */
@@ -171,7 +199,7 @@ export const requireAdmin = (
   res: Response,
   next: NextFunction
 ): void => {
-  if (!req.user || !req.user.uid) {
+  if (!req.user || !req.user.uid || !isVerifiedUser(req.user)) {
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authentication required: verified user token missing',
@@ -191,7 +219,7 @@ export const requireAdmin = (
 };
 
 /**
- * Ensures that the authenticated user possesses either 'teacher' or 'admin' role.
+ * Ensures that the authenticated user possesses either 'teacher' or 'admin' role with proven origin.
  * Returns 401 if unauthenticated, 403 if unauthorized.
  */
 export const requireTeacher = (
@@ -199,7 +227,7 @@ export const requireTeacher = (
   res: Response,
   next: NextFunction
 ): void => {
-  if (!req.user || !req.user.uid) {
+  if (!req.user || !req.user.uid || !isVerifiedUser(req.user)) {
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authentication required: verified user token missing',
@@ -229,7 +257,7 @@ export const requireStudent = (
   res: Response,
   next: NextFunction
 ): void => {
-  if (!req.user || !req.user.uid) {
+  if (!req.user || !req.user.uid || !isVerifiedUser(req.user)) {
     res.status(401).json({
       error: 'Unauthorized',
       message: 'Authentication required: verified user token missing',
@@ -242,17 +270,22 @@ export const requireStudent = (
 
 /**
  * Safely extracts and verifies the Firebase ID token from the request if provided.
+ * Defense-in-depth:
+ * 1. Checks if req.user has proven verified origin from our auth layer.
+ * 2. Never trusts arbitrary unverified objects attached to req.user.
+ * 3. Extracts and verifies token via Firebase Admin Auth verifyIdToken() from Authorization header.
  * Returns the AuthenticatedUser object if valid, or null if unauthenticated / invalid / missing.
  * Does NOT throw or terminate the request (ideal for optional-auth endpoints like GET /api/tutors).
  */
 export async function getVerifiedUserFromRequest(req: Request): Promise<AuthenticatedUser | null> {
-  // If request was already processed by firebaseAuthMiddleware
-  if (req.user && req.user.uid) {
+  // Defense in depth: only trust req.user if it was stamped as verified by our auth layer
+  if (req.user && isVerifiedUser(req.user)) {
     return req.user;
   }
 
+  // Untrusted req.user or unverified state is discarded; verify directly from authorization header
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
+  if (!authHeader || typeof authHeader !== 'string') {
     return null;
   }
 
@@ -266,12 +299,12 @@ export async function getVerifiedUserFromRequest(req: Request): Promise<Authenti
     const adminAuth = getFirebaseAdminAuth();
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const role = extractTrustedRole(decodedToken);
-    const user: AuthenticatedUser = {
+    const user: AuthenticatedUser = markAsVerifiedUser({
       uid: decodedToken.uid,
       email: decodedToken.email,
       email_verified: Boolean(decodedToken.email_verified),
       role,
-    };
+    });
     req.user = user;
     return user;
   } catch {

@@ -5259,15 +5259,15 @@ export default function App() {
         (t as any).status === 'approved' ||
         (t as any).approved === true;
       if (isApproved) {
-        const email = (t.email || '').toLowerCase().trim();
-        if (email) {
-          const existing = teacherMap.get(email) || ({} as GoogleAccount);
-          teacherMap.set(email, {
+        const key = (t.email || t.id || '').toLowerCase().trim();
+        if (key) {
+          const existing = teacherMap.get(key) || ({} as GoogleAccount);
+          teacherMap.set(key, {
             ...existing,
             ...t,
-            id: t.id || existing.id || `teacher-${email}`,
-            name: t.name || existing.name || email.split('@')[0],
-            email,
+            id: t.id || existing.id || `teacher-${key}`,
+            name: t.name || existing.name || (t.email ? t.email.split('@')[0] : 'Native Friend'),
+            email: t.email || existing.email || '',
             role: 'teacher',
             avatar: t.avatar || existing.avatar || '',
             picture: t.avatar || existing.picture || '',
@@ -5479,9 +5479,10 @@ export default function App() {
             }
           }}
           onBookLessonWithTutor={(tutor) => {
-            setTeacherEmailForConfig(tutor.email);
+            const targetIdentifier = tutor.email || tutor.id;
+            setTeacherEmailForConfig(targetIdentifier);
             if (currentAccount?.role === 'student') {
-              handleUpdateSubscription(tutor.email, tutor.name);
+              handleUpdateSubscription(targetIdentifier, tutor.name);
             }
             setIsScheduleModalOpen(true);
           }}
@@ -5558,9 +5559,10 @@ export default function App() {
               tutors={tutors}
               currentLanguage={currentLanguage}
               onBookLesson={(tutor) => {
-                setTeacherEmailForConfig(tutor.email);
+                const targetIdentifier = tutor.email || tutor.id;
+                setTeacherEmailForConfig(targetIdentifier);
                 if (currentAccount?.role === 'student') {
-                  handleUpdateSubscription(tutor.email, tutor.name);
+                  handleUpdateSubscription(targetIdentifier, tutor.name);
                 }
                 setIsScheduleModalOpen(true);
               }}
@@ -6403,7 +6405,7 @@ export default function App() {
         onPurchasePackage={handlePurchasePackage}
         initialSelectedTutor={subscriptionTargetTutor}
         onScheduleTrialLessonWithTutor={(tutor) => {
-          setTeacherEmailForConfig(tutor.email);
+          setTeacherEmailForConfig(tutor.email || tutor.id);
           setIsManageSubscriptionOpen(false);
           setIsScheduleModalOpen(true);
         }}
@@ -6490,7 +6492,7 @@ export default function App() {
           setIsOnboardingModalOpen(false);
         }}
         onOpenScheduleTrialLesson={(tutor, studentInfo) => {
-          setTeacherEmailForConfig(tutor.email);
+          setTeacherEmailForConfig(tutor.email || tutor.id);
           if (studentInfo && studentInfo.email) {
             setScheduleStudentInfo(studentInfo);
           } else {
