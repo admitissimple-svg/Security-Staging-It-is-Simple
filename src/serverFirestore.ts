@@ -61,8 +61,34 @@ export function setFirebaseAdminFirestoreForTesting(mockDb: Firestore | null): v
   adminFirestoreInstance = mockDb;
 }
 
+let isCloudWriteDisabled = false;
+
+export function isPermissionError(err: any): boolean {
+  if (!err) return false;
+  const msg = String(err.message || '');
+  const note = String(err.note || '');
+  const code = err.code;
+  return (
+    code === 7 ||
+    code === 'permission-denied' ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('Missing or insufficient permissions') ||
+    msg.includes('permission denied') ||
+    note.includes('not classified as transient')
+  );
+}
+
+export function getIsCloudWriteDisabled(): boolean {
+  return isCloudWriteDisabled;
+}
+
+export function setIsCloudWriteDisabled(disabled: boolean): void {
+  isCloudWriteDisabled = disabled;
+}
+
 export function resetFirebaseAdminFirestoreForTesting(): void {
   adminFirestoreInstance = null;
+  isCloudWriteDisabled = false;
 }
 
 // Timeout helper so remote Firestore never blocks an Express API response indefinitely
@@ -84,6 +110,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 1500): Promise<T | nul
  * Direct persistence for individual Native Friend / Tutor profiles in /tutors/{tutorId} and /users/{tutorId}
  */
 export async function saveTutorToFirestore(tutor: any): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !tutor) return false;
   try {
@@ -118,8 +145,13 @@ export async function saveTutorToFirestore(tutor: any): Promise<boolean> {
     const savePromise = Promise.all(writePromises).then(() => true);
     const result = await withTimeout(savePromise, 8000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveTutor error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote tutor save restricted by cloud IAM credentials, continuing with local state.');
+    } else {
+      console.warn('Firestore saveTutor error:', err);
+    }
     return false;
   }
 }
@@ -397,6 +429,7 @@ export async function fetchAppStateFromFirestore(): Promise<any | null> {
 }
 
 export async function saveYouTubePlaylistsToFirestore(playlists: any[]): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !Array.isArray(playlists)) return false;
   try {
@@ -411,8 +444,13 @@ export async function saveYouTubePlaylistsToFirestore(playlists: any[]): Promise
     ).then(() => true);
     const result = await withTimeout(savePromise, 3000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveYouTubePlaylists error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote YouTube playlists cloud write restricted by environment IAM credentials. Playlists saved to local server storage.');
+    } else {
+      console.warn('Firestore saveYouTubePlaylists error:', err);
+    }
     return false;
   }
 }
@@ -439,6 +477,7 @@ export async function fetchYouTubePlaylistsFromFirestore(): Promise<any[] | null
 }
 
 export async function saveAppStateToFirestore(data: any): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !data) return false;
   try {
@@ -556,13 +595,19 @@ export async function saveAppStateToFirestore(data: any): Promise<boolean> {
 
     const result = await withTimeout(savePromises, 15000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveAppState error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote app_state cloud write restricted by environment IAM credentials. App state safely preserved in local disk storage.');
+    } else {
+      console.warn('Firestore saveAppState error:', err);
+    }
     return false;
   }
 }
 
 export async function saveUserToFirestore(user: any): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !user?.email) return false;
   try {
@@ -581,8 +626,13 @@ export async function saveUserToFirestore(user: any): Promise<boolean> {
     const savePromise = db.collection('users').doc(docId).set(sanitized, { merge: true });
     const result = await withTimeout(savePromise.then(() => true), 10000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveUser error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote user cloud save restricted by environment IAM credentials, continuing with local state.');
+    } else {
+      console.warn('Firestore saveUser error:', err);
+    }
     return false;
   }
 }
@@ -728,6 +778,7 @@ export async function saveStudentAssignmentsByUid(
     updatedAt?: string;
   }
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !uid) return false;
   try {
@@ -739,8 +790,13 @@ export async function saveStudentAssignmentsByUid(
     const savePromise = db.collection('student_assignments').doc(uid).set(sanitized, { merge: true }).then(() => true);
     const result = await withTimeout(savePromise, 2000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveStudentAssignmentsByUid error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote student assignments write restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveStudentAssignmentsByUid error:', err);
+    }
     return false;
   }
 }
@@ -756,8 +812,10 @@ export async function fetchStudentAssignmentsByUid(uid: string): Promise<any | n
       return null;
     });
     return await withTimeout(fetchPromise, 2000);
-  } catch (err) {
-    console.warn('Firestore fetchStudentAssignmentsByUid error:', err);
+  } catch (err: any) {
+    if (!isPermissionError(err)) {
+      console.warn('Firestore fetchStudentAssignmentsByUid error:', err);
+    }
     return null;
   }
 }
@@ -781,6 +839,7 @@ export async function saveTeacherAvailabilityToFirestore(
     updatedAt?: string;
   }
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !uidOrEmail) return false;
   try {
@@ -798,8 +857,13 @@ export async function saveTeacherAvailabilityToFirestore(
 
     const result = await withTimeout(savePromise, 2000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveTeacherAvailabilityToFirestore error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote teacher availability write restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveTeacherAvailabilityToFirestore error:', err);
+    }
     return false;
   }
 }
@@ -820,8 +884,10 @@ export async function fetchTeacherAvailabilityFromFirestore(uidOrEmail: string):
       return null;
     });
     return await withTimeout(fetchPromise, 2000);
-  } catch (err) {
-    console.warn('Firestore fetchTeacherAvailabilityFromFirestore error:', err);
+  } catch (err: any) {
+    if (!isPermissionError(err)) {
+      console.warn('Firestore fetchTeacherAvailabilityFromFirestore error:', err);
+    }
     return null;
   }
 }
@@ -834,6 +900,7 @@ export async function saveRoutineVideoSubcollection(
   dayOfWeek: string,
   data: any
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !uid || !dayOfWeek) return false;
   try {
@@ -845,8 +912,13 @@ export async function saveRoutineVideoSubcollection(
     const savePromise = db.collection('users').doc(uid).collection('routines').doc(dayOfWeek).set(sanitized, { merge: true }).then(() => true);
     const result = await withTimeout(savePromise, 2000);
     return !!result;
-  } catch (err) {
-    console.warn('Firestore saveRoutineVideoSubcollection error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote routine video write restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveRoutineVideoSubcollection error:', err);
+    }
     return false;
   }
 }
@@ -858,6 +930,7 @@ export async function resetRepeatFlagsSubcollection(
   uid: string,
   days: string[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !uid) return false;
   try {
@@ -870,8 +943,13 @@ export async function resetRepeatFlagsSubcollection(
       )
     );
     return true;
-  } catch (err) {
-    console.warn('Firestore resetRepeatFlagsSubcollection error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote repeat flags reset restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore resetRepeatFlagsSubcollection error:', err);
+    }
     return false;
   }
 }
@@ -884,6 +962,7 @@ export async function addWatchedVideoToUserDoc(
   videoId: string,
   videoTitle?: string
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !uid || !videoId) return false;
   try {
@@ -912,8 +991,13 @@ export async function addWatchedVideoToUserDoc(
       await userRef.set({ watchedVideosHistory: list, updatedAt: new Date().toISOString() }, { merge: true });
     }
     return true;
-  } catch (err) {
-    console.warn('Firestore addWatchedVideoToUserDoc error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote watched video append restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore addWatchedVideoToUserDoc error:', err);
+    }
     return false;
   }
 }
@@ -926,6 +1010,7 @@ export async function saveStudentVocabularyToFirestoreServer(
   entries: any[],
   studentEmail?: string
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || (!studentUid && !studentEmail)) return false;
   if (!entries || entries.length === 0) return true;
@@ -973,8 +1058,13 @@ export async function saveStudentVocabularyToFirestoreServer(
       }
     }
     return true;
-  } catch (err) {
-    console.warn('Firestore server vocabulary save notice:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote vocabulary save restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore server vocabulary save notice:', err);
+    }
     return false;
   }
 }
@@ -1001,6 +1091,7 @@ export async function saveSessionNotesToFirestoreServer(
     driveLastSyncedAt?: string;
   }
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !sessionKey || !data) return false;
 
@@ -1045,8 +1136,13 @@ export async function saveSessionNotesToFirestoreServer(
 
     await Promise.all(savePromises);
     return true;
-  } catch (err) {
-    console.warn('Firestore server session notes save notice:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote session notes save restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore server session notes save notice:', err);
+    }
     return false;
   }
 }
@@ -1061,8 +1157,10 @@ export async function fetchSessionNotesFromFirestoreServer(sessionKey: string): 
       return snap.data();
     }
     return null;
-  } catch (err) {
-    console.warn('Firestore fetch session notes notice:', err);
+  } catch (err: any) {
+    if (!isPermissionError(err)) {
+      console.warn('Firestore fetch session notes notice:', err);
+    }
     return null;
   }
 }
@@ -1071,6 +1169,7 @@ export async function fetchSessionNotesFromFirestoreServer(sessionKey: string): 
  * Direct persistence for Native Friend notes review progress
  */
 export async function saveSessionNotesProgressToFirestore(key: string, cyclePayload: any): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !key) return false;
   try {
@@ -1088,8 +1187,13 @@ export async function saveSessionNotesProgressToFirestore(key: string, cyclePayl
       ),
     ]);
     return true;
-  } catch (err) {
-    console.warn('Firestore saveSessionNotesProgress error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote session notes progress save restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveSessionNotesProgress error:', err);
+    }
     return false;
   }
 }
@@ -1098,6 +1202,7 @@ export async function saveSessionNotesProgressToFirestore(key: string, cyclePayl
  * Direct persistence for Student Journal entries to users/{docId}
  */
 export async function saveStudentJournalToFirestore(docId: string, journal: any[]): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !docId) return false;
   try {
@@ -1110,8 +1215,13 @@ export async function saveStudentJournalToFirestore(docId: string, journal: any[
       { merge: true }
     );
     return true;
-  } catch (err) {
-    console.warn('Firestore saveStudentJournal error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote student journal save restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveStudentJournal error:', err);
+    }
     return false;
   }
 }
@@ -1168,6 +1278,7 @@ export async function saveWeeklyChecksToFirestore(
   weekDocPayload: any,
   fsRootPayload: any
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !docId) return false;
   try {
@@ -1178,8 +1289,13 @@ export async function saveWeeklyChecksToFirestore(
       userRef.set(JSON.parse(JSON.stringify(fsRootPayload)), { merge: true }),
     ]);
     return true;
-  } catch (err) {
-    console.warn('Firestore saveWeeklyChecks error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote weekly checks save restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveWeeklyChecks error:', err);
+    }
     return false;
   }
 }
@@ -1229,6 +1345,7 @@ export async function saveHomeworkToFirestore(
   cycle: number,
   hwPayload: any
 ): Promise<boolean> {
+  if (isCloudWriteDisabled) return false;
   const db = getFirestoreDb();
   if (!db || !docId) return false;
   try {
@@ -1256,8 +1373,13 @@ export async function saveHomeworkToFirestore(
     }
     await Promise.all(promises);
     return true;
-  } catch (err) {
-    console.warn('Firestore saveHomework error:', err);
+  } catch (err: any) {
+    if (isPermissionError(err)) {
+      isCloudWriteDisabled = true;
+      console.info('[serverFirestore] Remote homework save restricted by IAM, continuing with local state.');
+    } else {
+      console.warn('Firestore saveHomework error:', err);
+    }
     return false;
   }
 }

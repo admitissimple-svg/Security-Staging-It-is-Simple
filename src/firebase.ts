@@ -74,7 +74,7 @@ export const ACTIVE_FIREBASE_DATABASE_ID =
     typeof import.meta !== 'undefined' ? (import.meta as any).env?.VITE_FIREBASE_DATABASE_ID : undefined,
     'VITE_FIREBASE_DATABASE_ID',
     'firestoreDatabaseId'
-  ) || (appletConfig as any)?.firestoreDatabaseId || '(defaut)';
+  ) || (appletConfig as any)?.firestoreDatabaseId || '(default)';
 export const ACTIVE_FIRESTORE_DATABASE_ID = ACTIVE_FIREBASE_DATABASE_ID;
 
 // Validação estrita das configurações obrigatórias na inicialização
