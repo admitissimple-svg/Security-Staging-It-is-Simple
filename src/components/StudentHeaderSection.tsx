@@ -30,6 +30,9 @@ import { LiveMeetLessonsPanel } from './LiveMeetLessonsPanel';
 import { NativeFriendsNotesModal } from './NativeFriendsNotesModal';
 import { useNativeFriendsNotesReminder } from '../hooks/useNativeFriendsNotesReminder';
 
+// Pure in-memory tracking for review opened/completed state during active session (ZERO sessionStorage)
+const inMemorySessionReviewKeys = new Set<string>();
+
 interface StudentHeaderSectionProps {
   lessons: LiveLesson[];
   currentAccount: GoogleAccount | null;
@@ -116,22 +119,15 @@ export const StudentHeaderSection: React.FC<StudentHeaderSectionProps> = ({
     const sessionOpenedKey = `sequential_review_opened_${studentKey}_${todayStr}`;
     const sessionCompletedKey = `sequential_review_completed_${studentKey}_${todayStr}`;
 
-    let alreadyOpenedOrCompleted = hasAutoOpenedRef.current || isReviewCompletedToday;
-    if (!alreadyOpenedOrCompleted && typeof window !== 'undefined' && window.sessionStorage) {
-      try {
-        alreadyOpenedOrCompleted =
-          window.sessionStorage.getItem(sessionOpenedKey) === 'true' ||
-          window.sessionStorage.getItem(sessionCompletedKey) === 'true';
-      } catch {}
-    }
+    let alreadyOpenedOrCompleted =
+      hasAutoOpenedRef.current ||
+      isReviewCompletedToday ||
+      inMemorySessionReviewKeys.has(sessionOpenedKey) ||
+      inMemorySessionReviewKeys.has(sessionCompletedKey);
 
     if (!alreadyOpenedOrCompleted) {
       hasAutoOpenedRef.current = true;
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        try {
-          window.sessionStorage.setItem(sessionOpenedKey, 'true');
-        } catch {}
-      }
+      inMemorySessionReviewKeys.add(sessionOpenedKey);
       setIsAlertOpen(true);
     }
   }, [reminder, studentUid, studentEmail, timeZone, isReviewCompletedToday]);
@@ -151,11 +147,9 @@ export const StudentHeaderSection: React.FC<StudentHeaderSectionProps> = ({
     }).format(new Date());
 
     hasAutoOpenedRef.current = true;
-    if (studentKey && typeof window !== 'undefined' && window.sessionStorage) {
-      try {
-        window.sessionStorage.setItem(`sequential_review_opened_${studentKey}_${todayStr}`, 'true');
-        window.sessionStorage.setItem(`sequential_review_completed_${studentKey}_${todayStr}`, 'true');
-      } catch {}
+    if (studentKey) {
+      inMemorySessionReviewKeys.add(`sequential_review_opened_${studentKey}_${todayStr}`);
+      inMemorySessionReviewKeys.add(`sequential_review_completed_${studentKey}_${todayStr}`);
     }
 
     advanceSequentialStep();

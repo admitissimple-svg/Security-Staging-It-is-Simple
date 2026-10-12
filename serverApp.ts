@@ -1065,6 +1065,8 @@ app.get('/api/auth/verify-session', firebaseAuthMiddleware, (req, res) => {
 export const TRUSTED_ADMIN_EMAILS = new Set<string>([
   'adm.itissimple@gmail.com',
   'admin@itissimple.com',
+  'estilobeeadm@gmail.com',
+  'estilobeeforkids@gmail.com',
 ]);
 
 app.post('/api/auth/sync-admin-claims', firebaseAuthMiddleware, async (req, res) => {

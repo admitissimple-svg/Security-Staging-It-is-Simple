@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, setLogLevel, Firestore } from 'firebase/firestore';
+import { getAuth, initializeAuth, inMemoryPersistence, GoogleAuthProvider } from 'firebase/auth';
+import { getFirestore, initializeFirestore, memoryLocalCache, setLogLevel, Firestore } from 'firebase/firestore';
 
 // Silence internal gRPC stream disconnection logs
 try {
@@ -166,10 +166,22 @@ const firebaseAppConfig = {
 // Inicialização segura do Firebase (evita duplicação de instâncias)
 export const app = !getApps().length ? initializeApp(firebaseAppConfig) : getApp();
 
-export const auth = getAuth(app);
+let authInstance: ReturnType<typeof getAuth>;
+try {
+  authInstance = initializeAuth(app, { persistence: inMemoryPersistence });
+} catch {
+  authInstance = getAuth(app);
+}
+export const auth = authInstance;
 
-// Utiliza a instância do Firestore vinculada ao banco configurado
-export const db = getFirestore(app, ACTIVE_FIREBASE_DATABASE_ID);
+// Utiliza a instância do Firestore vinculada ao banco configurado com cache exclusivamente em memória
+let dbInstance: Firestore;
+try {
+  dbInstance = initializeFirestore(app, { localCache: memoryLocalCache() }, ACTIVE_FIREBASE_DATABASE_ID);
+} catch {
+  dbInstance = getFirestore(app, ACTIVE_FIREBASE_DATABASE_ID);
+}
+export const db = dbInstance;
 
 // Google Auth Provider
 export const googleAuthProvider = new GoogleAuthProvider();

@@ -51,15 +51,17 @@ export function extractTrustedRole(
     return 'student';
   }
 
-  const rawRole = (decodedToken as { role?: unknown }).role;
-  if (rawRole === 'admin') {
+  const rawRole = (decodedToken as { role?: unknown; admin?: unknown }).role;
+  if (rawRole === 'admin' || (decodedToken as { admin?: unknown }).admin === true) {
     return 'admin';
   }
-  if (rawRole === 'teacher') {
+  if (rawRole === 'teacher' || (decodedToken as { teacher?: unknown }).teacher === true) {
     return 'teacher';
   }
 
-  // Safety fallback: unknown or missing claim is safely treated as student
+  // Safety fallback: unknown, missing, or unverified claims default safely to 'student'.
+  // Administrative authority CANNOT be obtained merely by declaring an email present in a list;
+  // it requires an authorized mechanism (cryptographically verified custom claims from Firebase Admin SDK).
   return 'student';
 }
 
